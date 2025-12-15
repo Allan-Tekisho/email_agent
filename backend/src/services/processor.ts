@@ -18,38 +18,57 @@ export const processEmails = async () => {
 
         // Save to DB
         // First get dept ID
-        let deptRes = await query('SELECT id FROM departments WHERE name = $1', [department]);
-        let deptId = deptRes.rows[0]?.id;
-        if (!deptId) {
-            deptRes = await query('SELECT id FROM departments WHERE name = $1', ['Other']);
-            deptId = deptRes.rows[0]?.id;
+        let deptRes = await query('SELECT id, head_email, head_name FROM departments WHERE name = $1', [department]);
+        let deptData = deptRes.rows[0];
+
+        if (!deptData) {
+            deptRes = await query('SELECT id, head_email, head_name FROM departments WHERE name = $1', ['Other']);
+            deptData = deptRes.rows[0];
         }
 
+        const deptId = deptData?.id;
+        const headEmail = deptData?.head_email;
+
+        // Insert Email
         const insertRes = await query(
             'INSERT INTO emails (msg_id, subject, body, from_email, dept_id, priority, status, confidence) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id',
-            [email.msgId, email.subject, email.body, email.from, deptId, priority, 'PENDING', 0.8] // Mock confidence for now
+            [email.msgId, email.subject, email.body, email.from, deptId, priority, 'PENDING', 0.8]
         );
         const newEmailId = insertRes.rows[0].id;
 
-        // 2. RAG & Generate Reply
-        const context = await aiService.searchContext(email.body || '', department);
-        const reply = await aiService.generateReply(email.subject || '', email.body || '', context);
+        // 2. Urgent Handling
+        if (priority === 'HIGH') {
+            console.log("URGENT email detected. Forwarding to Head:", headEmail);
 
-        await query('INSERT INTO rag_logs (email_id, docs_used, generated_reply) VALUES ($1, $2, $3)',
-            [newEmailId, JSON.stringify(context), reply]
-        );
+            // Forward to Department Head
+            // (We mock the send here, but in production this would use emailService.sendEmail logic)
+            if (headEmail) {
+                await emailService.sendEmail(
+                    headEmail,
+                    `[URGENT] Forwarded: ${email.subject}`,
+                    `This urgent email was received from ${email.from}.\n\nBody:\n${email.body}`,
+                    undefined // No msgId needed for internal forward
+                );
+            }
 
-        // 3. Auto-send or Queue
-        // ...
+            // Mark as 'FORWARDED' or 'SENT' so it leaves the review queue? 
+            // Or keep in queue but note it? Let's mark as REVIEW_QUEUE but with a note in logs.
+            await query('INSERT INTO rag_logs (email_id, docs_used, generated_reply) VALUES ($1, $2, $3)',
+                [newEmailId, '[]', 'URGENT: Forwarded to Dept Head']
+            );
 
-        console.log("Drafted reply:", reply);
+            await query('UPDATE emails SET status = $1 WHERE id = $2', ['REVIEW_QUEUE', newEmailId]);
+        } else {
+            // 3. Normal Flow (RAG & Draft)
+            const context = await aiService.searchContext(email.body || '', department);
+            const reply = await aiService.generateReply(email.subject || '', email.body || '', context);
 
-        await query('UPDATE emails SET status = $1 WHERE id = $2', ['REVIEW_QUEUE', newEmailId]);
+            await query('INSERT INTO rag_logs (email_id, docs_used, generated_reply) VALUES ($1, $2, $3)',
+                [newEmailId, JSON.stringify(context), reply]
+            );
 
-        // If we wanted to autosend:
-        // if (confidence > 0.75) {
-        //    await emailService.sendEmail(email.from, "Re: " + email.subject, reply, undefined, headEmail);
-        //    await query('UPDATE emails SET status = $1 WHERE id = $2', ['SENT', newEmailId]);
-        // }
+            console.log("Drafted reply:", reply);
+            await query('UPDATE emails SET status = $1 WHERE id = $2', ['REVIEW_QUEUE', newEmailId]);
+        }
     }
 };
