@@ -5,7 +5,7 @@ import crypto from 'crypto';
 export class AIService {
     private openai;
     private pinecone: Pinecone | undefined;
-    private indexName = 'email-agent-index';
+    private indexName = process.env.PINECONE_INDEX || 'email-agent-index';
 
     constructor() {
         // Init OpenAI (Standard)

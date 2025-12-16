@@ -89,10 +89,10 @@ export default function Dashboard() {
                 {activeTab === 'dashboard' && (
                     <>
                         <div className="grid grid-cols-4 gap-4 mb-8">
-                            <MetricCard title="Total Emails" value={metrics.total} icon={<Mail />} />
-                            <MetricCard title="In Queue" value={metrics.queue} icon={<Clock />} color="text-amber-600" />
-                            <MetricCard title="Auto Sent" value={metrics.sent} icon={<CheckCircle />} color="text-green-600" />
-                            <MetricCard title="Avg Confidence" value={`${(metrics.avgConfidence * 100).toFixed(0)}%`} icon={<AlertCircle />} />
+                            <MetricCard title="Total Emails" value={metrics?.total || 0} icon={<Mail />} />
+                            <MetricCard title="In Queue" value={metrics?.queue || 0} icon={<Clock />} color="text-amber-600" />
+                            <MetricCard title="Auto Sent" value={metrics?.sent || 0} icon={<CheckCircle />} color="text-green-600" />
+                            <MetricCard title="Avg Confidence" value={metrics?.avgConfidence ? `${(metrics.avgConfidence * 100).toFixed(0)}%` : '0%'} icon={<AlertCircle />} />
                         </div>
 
                         <div className="card">
@@ -109,7 +109,7 @@ export default function Dashboard() {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
-                                        {emails.map((email: any) => (
+                                        {(emails || []).map((email: any) => (
                                             <tr key={email.id} className="group hover:bg-gray-50">
                                                 <td className="py-4 pr-4 font-medium">{email.subject}</td>
                                                 <td className="py-4">
@@ -156,7 +156,7 @@ export default function Dashboard() {
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Document</label>
-                                <input type="file" className="w-full" onChange={(e: any) => setUploadFile(e.target.files[0])} accept=".pdf,.txt" required />
+                                <input type="file" className="w-full" onChange={(e: any) => setUploadFile(e.target.files[0])} accept=".pdf,.txt,.docx" required />
                             </div>
                             <button type="submit" className="w-full py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium">
                                 Upload & Index

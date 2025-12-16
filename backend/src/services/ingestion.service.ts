@@ -1,4 +1,5 @@
 const pdf = require('pdf-parse');
+const mammoth = require('mammoth');
 
 export class IngestionService {
     async parseFile(buffer: Buffer, mimetype: string): Promise<string> {
@@ -7,8 +8,12 @@ export class IngestionService {
             return data.text;
         } else if (mimetype === 'text/plain') {
             return buffer.toString('utf-8');
+        } else if (mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+            const result = await mammoth.extractRawText({ buffer: buffer });
+            return result.value;
         } else {
-            throw new Error('Unsupported file type');
+            console.log("Unsupported mimetype:", mimetype);
+            throw new Error('Unsupported file type: ' + mimetype);
         }
     }
 
