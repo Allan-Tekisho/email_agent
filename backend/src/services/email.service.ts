@@ -31,7 +31,7 @@ export class EmailService {
     async sendEmail(to: string, subject: string, body: string, inReplyTo?: string, cc?: string) {
         console.log(`Sending email to ${to} (CC: ${cc}) with subject: ${subject}`);
         const mailOptions: any = {
-            from: process.env.GMAIL_USER,
+            from: `"[Email-agent]" <${process.env.GMAIL_USER}>`,
             to,
             subject,
             text: body,

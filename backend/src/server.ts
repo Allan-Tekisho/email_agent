@@ -48,7 +48,7 @@ app.post('/api/documents', upload.single('file'), async (req, res: any) => {
         // Mock Insert KB Doc
         const kbRes = await query(`
             INSERT INTO kb_documents (title, department_id, doc_type, storage_url, file_type, status, uploader_user_id, uploader_role)
-            VALUES ($1, $2, 'POLICY', 'mock_url', 'pdf', 'APPROVED', (SELECT id FROM users LIMIT 1), 'ADMIN')
+            VALUES ($1, $2, 'policy', 'mock_url', 'pdf', 'approved', (SELECT id FROM users LIMIT 1), 'ADMIN')
             RETURNING id
         `, [file.originalname, dept_id]);
 

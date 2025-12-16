@@ -6,14 +6,16 @@ DATABASE_URL=postgresql://postgres:Zl9SOdinLfcMwgd3@db.mghlwthrsewacxnmvssy.supa
 
 # Email
 GMAIL_USER="atomic01062002@gmail.com"
-GMAIL_PASS="Atomic11@162002"
+GMAIL_PASS="ljez eurm ytug zume"
 
 
 # AI (Deepseek + HuggingFace)
-DEEPSEEK_API_KEY= "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"
+DEEPSEEK_API_KEY=" sk-708fb2e6d44f404c9b042f34dfd9b794"
+HUGGINGFACE_API_KEY="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"
 
 # Vector DB (Pinecone)
-PINECONE_API_KEY= "pcsk_4so4CA_BKR4TuqX27ZtVnUGNEv6WaALezcTkJ1i4GP8BmgkyyzS614U9TzoJrMwpFfCPPw"
+PINECONE_API_KEY="pcsk_4DGzxX_7ikgWxoPNxWb3PwdGc1npDXS4JHiM4omEEAXqNm2WqrTtYzqZ23aMAVLASgRhdW"
+PINECONE_INDEX="email-agent"
 `;
 
 const frontendEnv = `NEXT_PUBLIC_API_URL=http://localhost:4000

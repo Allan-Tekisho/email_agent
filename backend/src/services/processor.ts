@@ -87,7 +87,10 @@ export const processEmails = async () => {
         } else {
             // Normal Flow
             const context = await aiService.searchContext(email.body || '', department);
-            const reply = await aiService.generateReply(email.subject || '', email.body || '', context);
+            const { reply, confidence } = await aiService.generateReply(email.subject || '', email.body || '', context);
+
+            // Normalize confidence to 0.0-1.0 for DB
+            const confScore = confidence / 100;
 
             if (deptId) {
                 await query(
@@ -96,14 +99,32 @@ export const processEmails = async () => {
                 );
             }
 
-            // Insert into Review Queue
-            await query(
-                `INSERT INTO email_review_queue (email_id, status, draft_reply_text) VALUES ($1, $2, $3)`,
-                [newEmailId, 'needs_review', reply]
-            );
+            // Update Confidence in DB
+            await query(`UPDATE emails SET confidence_score = $1 WHERE id = $2`, [confScore, newEmailId]);
 
-            console.log("Drafted reply:", reply);
-            await query(`UPDATE emails SET status = 'needs_review' WHERE id = $1`, [newEmailId]);
+            // AUTO-SEND if Low Confidence (Holding Reply)
+            if (confidence < 50) {
+                console.log(`Low confidence (${confidence}%). Auto-sending holding reply.`);
+                await emailService.sendEmail(
+                    email.from || '',
+                    `Re: ${email.subject}`,
+                    reply,
+                    email.msgId
+                );
+                await query(`UPDATE emails SET status = 'human_answered' WHERE id = $1`, [newEmailId]);
+
+            }
+            // AUTO-SEND if High Confidence (Answer) - Now >= 50% covers everything else
+            else {
+                console.log(`High confidence (${confidence}%). Auto-sending answer.`);
+                await emailService.sendEmail(
+                    email.from || '',
+                    `Re: ${email.subject}`,
+                    reply,
+                    email.msgId
+                );
+                await query(`UPDATE emails SET status = 'rag_answered' WHERE id = $1`, [newEmailId]);
+            }
         }
     }
 };

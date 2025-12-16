@@ -1,16 +1,22 @@
 import OpenAI from 'openai';
 import { Pinecone } from '@pinecone-database/pinecone';
 import crypto from 'crypto';
+import axios from 'axios';
 
 export class AIService {
     private openai;
     private pinecone: Pinecone | undefined;
-    private indexName = process.env.PINECONE_INDEX || 'email-agent-index';
+    private indexName = process.env.PINECONE_INDEX || 'email-agent';
 
     constructor() {
-        // Init OpenAI (Standard)
+        // Init OpenAI
+        console.log("Initializing OpenAI Client...");
+        // console.log("Base URL:", 'https://api.openai.com/v1'); // Default
+        console.log("API Key (Prefix):", process.env.DEEPSEEK_API_KEY?.substring(0, 10)); // User put OpenAI key here
+
         this.openai = new OpenAI({
-            apiKey: process.env.DEEPSEEK_API_KEY, // Reusing existing env, but this will be your OpenAI key
+            // baseURL: 'https://api.deepseek.com', // REMOVED
+            apiKey: process.env.DEEPSEEK_API_KEY,   // Using the var user populated
         });
 
         if (process.env.PINECONE_API_KEY) {
@@ -21,14 +27,29 @@ export class AIService {
     }
 
     async getEmbeddings(text: string): Promise<number[]> {
+        // Using HuggingFace Inference API for BAAI/bge-large-en-v1.5
+        const model = "BAAI/bge-large-en-v1.5";
+        const hfToken = process.env.HUGGINGFACE_API_KEY;
+
         try {
-            const response = await this.openai.embeddings.create({
-                model: "text-embedding-3-small",
-                input: text,
-            });
-            return response.data[0].embedding;
-        } catch (e) {
-            console.error("Embedding Error", e);
+            const response = await axios.post(
+                `https://router.huggingface.co/pipeline/feature-extraction/${model}`,
+                { inputs: text },
+                {
+                    headers: {
+                        Authorization: `Bearer ${hfToken}`,
+                        "Content-Type": "application/json",
+                    },
+                }
+            );
+
+            // Handle HF response format
+            if (Array.isArray(response.data) && Array.isArray(response.data[0])) {
+                return response.data[0];
+            }
+            return response.data;
+        } catch (e: any) {
+            console.error("HuggingFace Embedding Error", e.response?.data || e.message);
             return [];
         }
     }
@@ -63,29 +84,34 @@ export class AIService {
         const prompt = `
         You are a helpful Email Agent. 
         
-        Task: Draft a reply to this email.
+        Task: Draft a reply to this email and estimate your confidence (0-100) that the provided context answers the user's question.
         
         Rules:
-        1. If the provided context contains the answer, draft a professional reply answering the user's question.
-        2. If the context is NOT sufficient or relevant to answer the specific question, draft a polite "holding reply" stating that the team is reviewing their request and will respond within 24 hours. 
-        3. Do NOT make up facts.
+        1. If context contains the answer -> High confidence (80-100). Draft professional reply.
+        2. If context is partial -> Medium confidence (50-79). Draft reply with available info.
+        3. If context is irrelevant/missing -> Low confidence (0-49). Draft a polite "holding reply" (we are reviewing your request).
+        4. Sign off as "[Email-agent]". Do not use any other name.
         
         Context:
         ${contextDocs.join('\n---\n')}
         
         Email Subject: ${subject}
         Email Body: ${body}
+        
+        Output JSON only: { "reply": "...", "confidence": number }
         `;
 
         try {
             const completion = await this.openai.chat.completions.create({
                 messages: [{ role: "user", content: prompt }],
                 model: "gpt-4o",
+                response_format: { type: "json_object" }
             });
-            return completion.choices[0].message.content || "";
+            const content = completion.choices[0].message.content || "{}";
+            return JSON.parse(content);
         } catch (e) {
             console.error("Reply generation error", e);
-            return "Error generating reply.";
+            return { reply: "Error generating reply.", confidence: 0 };
         }
     }
 
@@ -95,7 +121,7 @@ export class AIService {
             const index = this.pinecone.index(this.indexName);
             const embedding = await this.getEmbeddings(text);
 
-            if (embedding.length === 0) {
+            if (!embedding || embedding.length === 0) {
                 console.error("Skipping indexing due to embedding failure");
                 return;
             }
@@ -122,7 +148,7 @@ export class AIService {
             const index = this.pinecone.index(this.indexName);
             const embedding = await this.getEmbeddings(queryText);
 
-            if (embedding.length === 0) return [];
+            if (!embedding || embedding.length === 0) return [];
 
             const searchResult = await index.query({
                 vector: embedding,
