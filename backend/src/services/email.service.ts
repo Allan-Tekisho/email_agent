@@ -22,7 +22,8 @@ export class EmailService {
                 host: 'imap.gmail.com',
                 port: 993,
                 tls: true,
-                authTimeout: 3000
+                tlsOptions: { rejectUnauthorized: false },
+                authTimeout: 10000
             }
         };
     }

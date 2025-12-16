@@ -1,22 +1,17 @@
 import OpenAI from 'openai';
-import axios from 'axios';
 import { Pinecone } from '@pinecone-database/pinecone';
 import crypto from 'crypto';
 
 export class AIService {
     private openai;
     private pinecone: Pinecone | undefined;
-    private indexName = 'email-agent-index';
-    private hfToken;
+    private indexName = process.env.PINECONE_INDEX || 'email-agent-index';
 
     constructor() {
-        // Init Deepseek (OpenAI Compatible)
+        // Init OpenAI (Standard)
         this.openai = new OpenAI({
-            baseURL: 'https://api.deepseek.com',
-            apiKey: process.env.DEEPSEEK_API_KEY || 'dummy',
+            apiKey: process.env.DEEPSEEK_API_KEY, // Reusing existing env, but this will be your OpenAI key
         });
-
-        this.hfToken = process.env.HUGGINGFACE_API_KEY;
 
         if (process.env.PINECONE_API_KEY) {
             this.pinecone = new Pinecone({
@@ -26,29 +21,12 @@ export class AIService {
     }
 
     async getEmbeddings(text: string): Promise<number[]> {
-        // Use HuggingFace Inference API for 'all-mpnet-base-v2' (768 dim)
         try {
-            const response = await axios.post(
-                "https://api-inference.huggingface.co/models/sentence-transformers/all-mpnet-base-v2",
-                { inputs: text },
-                {
-                    headers: { Authorization: `Bearer ${this.hfToken}` }
-                }
-            );
-
-            if (response.data && response.data.error) {
-                console.error("HF Error:", response.data.error);
-                return []; // Fail gracefully or retry
-            }
-            // Check format (array of numbers)
-            if (Array.isArray(response.data) && typeof response.data[0] === 'number') {
-                return response.data;
-            }
-            // Sometimes it returns [ [num, num...] ]
-            if (Array.isArray(response.data) && Array.isArray(response.data[0])) {
-                return response.data[0];
-            }
-            return [];
+            const response = await this.openai.embeddings.create({
+                model: "text-embedding-3-small",
+                input: text,
+            });
+            return response.data[0].embedding;
         } catch (e) {
             console.error("Embedding Error", e);
             return [];
@@ -69,7 +47,7 @@ export class AIService {
         try {
             const completion = await this.openai.chat.completions.create({
                 messages: [{ role: "user", content: prompt }],
-                model: "deepseek-chat",
+                model: "gpt-4o",
                 response_format: { type: "json_object" }
             });
 
@@ -83,22 +61,26 @@ export class AIService {
 
     async generateReply(subject: string, body: string, contextDocs: string[]) {
         const prompt = `
-        You are a helpful Email Agent. Draft a reply to this email.
-        Use the context provided if relevant.
+        You are a helpful Email Agent. 
+        
+        Task: Draft a reply to this email.
+        
+        Rules:
+        1. If the provided context contains the answer, draft a professional reply answering the user's question.
+        2. If the context is NOT sufficient or relevant to answer the specific question, draft a polite "holding reply" stating that the team is reviewing their request and will respond within 24 hours. 
+        3. Do NOT make up facts.
         
         Context:
         ${contextDocs.join('\n---\n')}
         
         Email Subject: ${subject}
         Email Body: ${body}
-        
-        Draft a professional reply.
         `;
 
         try {
             const completion = await this.openai.chat.completions.create({
                 messages: [{ role: "user", content: prompt }],
-                model: "deepseek-chat",
+                model: "gpt-4o",
             });
             return completion.choices[0].message.content || "";
         } catch (e) {
