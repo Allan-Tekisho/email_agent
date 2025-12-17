@@ -57,49 +57,59 @@ export class EmailService {
     }
 
     async fetchUnreadEmails() {
+        console.log('Connecting to IMAP server...');
+        console.log('IMAP User:', process.env.GMAIL_USER);
+
         try {
             const connection = await imaps.connect(this.imapConfig);
+            console.log('IMAP Connected successfully');
+
             await connection.openBox('INBOX');
+            console.log('Opened INBOX');
 
             const searchCriteria = ['UNSEEN'];
             const fetchOptions = {
                 bodies: ['HEADER', 'TEXT', ''],
-                markSeen: false // Keep as unread until processed? Or mark read. Let's keep unread for safety for now or mark read. User said "polls INBOX".
+                markSeen: true // Mark as seen after fetching to avoid reprocessing
             };
 
             const messages = await connection.search(searchCriteria, fetchOptions);
+            console.log(`Found ${messages.length} UNSEEN messages in INBOX`);
+
             const emails = [];
 
             for (const item of messages) {
-                const all = item.parts.find((part: any) => part.which === '');
-                const id = item.attributes.uid;
-                const idHeader = item.parts.find((part: any) => part.which === 'HEADER');
+                try {
+                    const id = item.attributes.uid;
+                    const fullBody = item.parts.find((p: any) => p.which === "")?.body;
 
-                // Parse the email
-                const parsed = await simpleParser(all?.body || ''); // This might need raw body source. imap-simple returns parts.
-                // Simplified for this MVP:
-                // Actually imap-simple returns body as string or buffer.
-                // Let's use a simpler approach for the MVP or assume `simpleParser` works on the stream.
+                    if (fullBody) {
+                        const parsedMail = await simpleParser(fullBody);
+                        console.log(`Parsed email UID ${id}: Subject="${parsedMail.subject}" From="${parsedMail.from?.text}"`);
 
-                // For MVP robustness, let's just grab header subject and body if possible.
-                // Correct logic for imap-simple with simpleParser:
-                const fullBody = item.parts.find((p: any) => p.which === "")?.body;
-                if (fullBody) {
-                    const parsedMail = await simpleParser(fullBody);
-                    emails.push({
-                        uid: id,
-                        from: parsedMail.from?.text,
-                        subject: parsedMail.subject,
-                        body: parsedMail.text,
-                        msgId: parsedMail.messageId
-                    });
+                        emails.push({
+                            uid: id,
+                            from: parsedMail.from?.text,
+                            subject: parsedMail.subject,
+                            body: parsedMail.text,
+                            msgId: parsedMail.messageId
+                        });
+                    } else {
+                        console.log(`Email UID ${id}: No body found`);
+                    }
+                } catch (parseError) {
+                    console.error(`Error parsing email:`, parseError);
                 }
             }
 
             connection.end();
+            console.log('IMAP connection closed');
             return emails;
-        } catch (error) {
-            console.error('Error fetching emails:', error);
+        } catch (error: any) {
+            console.error('Error fetching emails:', error.message || error);
+            if (error.source) {
+                console.error('Error source:', error.source);
+            }
             return [];
         }
     }
