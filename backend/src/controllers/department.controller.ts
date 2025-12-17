@@ -12,7 +12,19 @@ export const DepartmentController = {
     },
 
     updateHead: async (req: Request, res: Response) => {
-        // Not implemented in new schema yet
-        res.status(501).json({ error: "Not implemented in new schema yet." });
+        const { id } = req.params;
+        const { head_name, head_email } = req.body;
+
+        if (!head_name || !head_email) {
+            return res.status(400).json({ error: "head_name and head_email are required" });
+        }
+
+        try {
+            await DepartmentModel.updateHead(id, head_name, head_email);
+            res.json({ success: true });
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
     }
+
 };

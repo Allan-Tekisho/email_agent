@@ -94,7 +94,7 @@ export class AIService {
         Rules:
         1. If context contains the answer -> High confidence (80-100). Draft professional reply.
         2. If context is partial -> Medium confidence (50-79). Draft reply with available info.
-        3. If context is irrelevant/missing -> Low confidence (0-49). Draft a polite "holding reply" (we are reviewing your request).
+        3. If context is irrelevant/missing -> Low confidence (0-49). Draft a polite "holding reply" (we are reviewing your request and will get back to you in 24 hours).
         4. Sign off as "Tekisho email agent". Do not use any other name.
         
         Context:

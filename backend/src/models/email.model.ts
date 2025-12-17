@@ -4,11 +4,11 @@ export const EmailModel = {
     getPendingAndReview: async () => {
         return query(`
         SELECT e.id, e.subject, e.status, e.confidence_score as confidence,
-               e.body_text, e.generated_reply, e.from_email,
+               e.body_text, e.generated_reply, e.from_email, e.created_at,
                d.name as dept_name
         FROM emails e
         LEFT JOIN departments d ON e.classified_dept_id = d.id
-        WHERE e.status = 'needs_review' OR e.status = 'pending'
+        -- WHERE e.status = 'needs_review' OR e.status = 'pending' (Removed to show all emails)
         ORDER BY e.created_at DESC
     `);
     },
