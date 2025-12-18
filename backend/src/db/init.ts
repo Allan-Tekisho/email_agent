@@ -1,9 +1,11 @@
 import { initDb } from './index';
 
-initDb().then(() => {
-    console.log('DB Init Script Finished');
-    process.exit(0);
-}).catch(e => {
-    console.error(e);
-    process.exit(1);
-});
+initDb()
+    .then(() => {
+        console.log('DB Init Complete');
+        process.exit(0);
+    })
+    .catch((err) => {
+        console.error('DB Init Failed', err);
+        process.exit(1);
+    });

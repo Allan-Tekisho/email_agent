@@ -1,0 +1,5 @@
+{
+  "name": "MailGuard AI",
+  "description": "Intelligent Enterprise Email Automation Dashboard featuring LLM classification, RAG document management, and SLA tracking.",
+  "requestFramePermissions": []
+}

@@ -9,63 +9,80 @@ export const processEmails = async () => {
     console.log("Polling for new emails...");
     const emails = await emailService.fetchUnreadEmails();
 
+    console.log(`Found ${emails.length} unread email(s)`);
+
+    if (emails.length === 0) {
+        console.log("No new emails to process.");
+        return;
+    }
+
     for (const email of emails) {
-        console.log(`Processing email: ${email.subject}`);
+        console.log(`Processing email: ${email.subject} from ${email.from}`);
 
         // Classify
         const classification = await aiService.classifyEmail(email.subject || '', email.body || '');
         const { department, priority } = classification;
+
+        console.log(`Classified as: ${department} (Priority: ${priority})`);
 
         // Resolve Department ID
         let deptId: string | null = null;
         let headEmail: string | null = null;
 
         // Find Dept
-        let deptRes = await query('SELECT id FROM departments WHERE name = $1', [department]);
+        // Try strict match first
+        let deptRes = await query('SELECT id, head_email FROM departments WHERE name = $1', [department]);
+
+        // If not found, try case-insensitive match or 'Other'
         if (deptRes.rows.length === 0) {
-            deptRes = await query('SELECT id FROM departments WHERE name = $1', ['Other']);
+            deptRes = await query('SELECT id, head_email FROM departments WHERE LOWER(name) = LOWER($1)', [department]);
+        }
+
+        if (deptRes.rows.length === 0) {
+            console.log(`Department '${department}' not found in DB. Fallback to 'Other'.`);
+            deptRes = await query("SELECT id, head_email FROM departments WHERE name = 'Other'");
+        } else {
+            console.log(`Department '${department}' found.`);
         }
 
         if (deptRes.rows.length > 0) {
             deptId = deptRes.rows[0].id;
-
-            // Find Head Email via Join
-            const headRes = await query(`
-                SELECT u.email 
-                FROM department_heads dh
-                JOIN users u ON dh.user_id = u.id
-                WHERE dh.department_id = $1 AND dh.is_primary = true
-            `, [deptId]);
-
-            if (headRes.rows.length > 0) {
-                headEmail = headRes.rows[0].email;
+            if (deptRes.rows[0].head_email) {
+                headEmail = deptRes.rows[0].head_email;
             }
+        } else {
+            console.warn("Fatal: Even fallback 'Other' department not found.");
         }
 
-        // Insert into emails table (New Schema)
+        // Insert into emails table
         const insertRes = await query(
             `INSERT INTO emails (
-                message_id, subject, body_text, from_email, primary_department_id, priority, status, confidence_score, to_email, received_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+                subject, body_text, from_email, classified_dept_id, status, confidence_score, priority
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
             [
-                email.msgId,
                 email.subject,
                 email.body,
                 email.from,
                 deptId,
-                priority.toLowerCase(),
                 'pending',
                 0.8,
-                'agent@company.com',
-                new Date()
+                (priority || 'medium').toLowerCase()
             ]
         );
         const newEmailId = insertRes.rows[0].id;
 
+        // Generate Reply & Confidence Context (Performed early to support all flows)
+        const context = await aiService.searchContext(email.body || '', department);
+        const { reply, confidence } = await aiService.generateReply(email.subject || '', email.body || '', context, department);
+
+        // Normalize confidence
+        const confScore = confidence / 100;
+
         // Urgent Handling
-        if (priority === 'HIGH') {
+        if (priority?.toLowerCase() === 'high') {
             console.log("URGENT email detected. Forwarding to Head:", headEmail);
 
+            // Forward to Head
             if (headEmail) {
                 await emailService.sendEmail(
                     headEmail,
@@ -75,32 +92,35 @@ export const processEmails = async () => {
                 );
             }
 
-            await query(`UPDATE emails SET status = 'needs_review' WHERE id = $1`, [newEmailId]);
-
-            if (deptId) {
-                await query(
-                    'INSERT INTO rag_logs (email_id, department_id, used_chunks, auto_sent) VALUES ($1, $2, $3, $4)',
-                    [newEmailId, deptId, JSON.stringify({ note: 'URGENT: Forwarded to Dept Head' }), false]
+            // AUTO-SEND Holding Reply if Low Confidence
+            if (confidence < 50) {
+                console.log(`URGENT + Low confidence (${confidence}%). Sending holding reply to user.`);
+                await emailService.sendEmail(
+                    email.from || '',
+                    `Re: ${email.subject}`,
+                    reply,
+                    email.msgId,
+                    undefined // No CC to head for the holding reply itself? Or yes? User didn't specify, but forwarding already happened.
                 );
             }
+
+            // Status remains needs_review (because it's high priority/forwarded)
+            // But we should update generated_reply/confidence/rag_meta
+            await query(`UPDATE emails SET status = 'needs_review', confidence_score = $3, generated_reply = $4, rag_meta = $2 WHERE id = $1`, [
+                newEmailId,
+                JSON.stringify({ note: 'URGENT: Forwarded to Dept Head', department_id: deptId, holding_sent: confidence < 50 }),
+                confScore,
+                reply
+            ]);
 
         } else {
-            // Normal Flow
-            const context = await aiService.searchContext(email.body || '', department);
-            const { reply, confidence } = await aiService.generateReply(email.subject || '', email.body || '', context);
+            // Normal Flow (Medium/Low)
 
-            // Normalize confidence to 0.0-1.0 for DB
-            const confScore = confidence / 100;
-
-            if (deptId) {
-                await query(
-                    'INSERT INTO rag_logs (email_id, department_id, used_chunks, auto_sent) VALUES ($1, $2, $3, $4)',
-                    [newEmailId, deptId, JSON.stringify(context), false]
-                );
-            }
-
-            // Update Confidence in DB
-            await query(`UPDATE emails SET confidence_score = $1 WHERE id = $2`, [confScore, newEmailId]);
+            // Update Confidence and RAG meta in DB
+            await query(
+                `UPDATE emails SET confidence_score = $1, generated_reply = $2, rag_meta = $3 WHERE id = $4`,
+                [confScore, reply, JSON.stringify({ used_chunks: context, auto_sent: false }), newEmailId]
+            );
 
             // AUTO-SEND if Low Confidence (Holding Reply)
             if (confidence < 50) {
@@ -109,21 +129,29 @@ export const processEmails = async () => {
                     email.from || '',
                     `Re: ${email.subject}`,
                     reply,
-                    email.msgId
+                    email.msgId,
+                    headEmail || undefined
                 );
-                await query(`UPDATE emails SET status = 'human_answered' WHERE id = $1`, [newEmailId]);
+                await query(`UPDATE emails SET status = 'rag_answered', rag_meta = $2, sent_at = NOW() WHERE id = $1`, [
+                    newEmailId,
+                    JSON.stringify({ used_chunks: context, auto_sent: true })
+                ]);
 
             }
-            // AUTO-SEND if High Confidence (Answer) - Now >= 50% covers everything else
+            // AUTO-SEND if High Confidence (Answer)
             else {
                 console.log(`High confidence (${confidence}%). Auto-sending answer.`);
                 await emailService.sendEmail(
                     email.from || '',
                     `Re: ${email.subject}`,
                     reply,
-                    email.msgId
+                    email.msgId,
+                    headEmail || undefined
                 );
-                await query(`UPDATE emails SET status = 'rag_answered' WHERE id = $1`, [newEmailId]);
+                await query(`UPDATE emails SET status = 'rag_answered', rag_meta = $2, sent_at = NOW() WHERE id = $1`, [
+                    newEmailId,
+                    JSON.stringify({ used_chunks: context, auto_sent: true })
+                ]);
             }
         }
     }
